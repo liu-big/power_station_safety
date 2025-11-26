@@ -1,0 +1,49 @@
+# 电站安全监控系统配置文件
+
+# 模型配置
+model:
+  # YOLO模型路径
+  path: "powerplant_safety_detection/yolov8n_experiment/weights/best.pt"
+  # 置信度阈值（默认）
+  confidence_threshold: 0.6
+  # 输入图像尺寸
+  input_size: [640, 640]
+  
+# 类别映射
+classes:
+  0: "fire"
+  1: "hardhat"
+  2: "no-hardhat"
+  3: "safety-vest"
+  4: "no-safety-vest"
+
+# 中文类别映射
+chinese_classes:
+  "fire": "明火"
+  "hardhat": "戴安全帽"
+  "no-hardhat": "未戴安全帽"
+  "safety-vest": "合规工作服"
+  "no-safety-vest": "不合规工作服"
+
+# 风险等级定义
+risk_levels:
+  "fire": "紧急"
+  "no-hardhat": "高风险"
+  "no-safety-vest": "中风险"
+  "hardhat": "安全"
+  "safety-vest": "安全"
+
+# 数据库配置
+database:
+  path: "safety_monitor.db"
+  # 保留记录天数
+  retention_days: 30
+
+# 界面配置
+ui:
+  # 默认窗口大小
+  window_size: [1200, 800]
+  # 视频帧率
+  fps: 30
+  # 数据队列最大长度
+  queue_maxsize: 10
