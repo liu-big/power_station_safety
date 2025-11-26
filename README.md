@@ -185,6 +185,32 @@ python src/monitor/main_ui.py
 - `train_batch*.jpg`: 训练批次样本
 - `val_batch*_pred.jpg`: 验证集预测结果
 
+#### 训练过程指标图
+
+![训练结果](powerplant_safety_detection/yolov8n_experiment/results.png)
+
+![F1分数曲线](powerplant_safety_detection/yolov8n_experiment/BoxF1_curve.png)
+
+![PR曲线](powerplant_safety_detection/yolov8n_experiment/BoxPR_curve.png)
+
+![混淆矩阵](powerplant_safety_detection/yolov8n_experiment/confusion_matrix.png)
+
+#### 训练批次样本
+
+![训练批次0](powerplant_safety_detection/yolov8n_experiment/train_batch0.jpg)
+
+![训练批次1](powerplant_safety_detection/yolov8n_experiment/train_batch1.jpg)
+
+![训练批次2](powerplant_safety_detection/yolov8n_experiment/train_batch2.jpg)
+
+#### 验证集结果
+
+![验证集标签0](powerplant_safety_detection/yolov8n_experiment/val_batch0_labels.jpg)
+![验证集预测0](powerplant_safety_detection/yolov8n_experiment/val_batch0_pred.jpg)
+
+![验证集标签1](powerplant_safety_detection/yolov8n_experiment/val_batch1_labels.jpg)
+![验证集预测1](powerplant_safety_detection/yolov8n_experiment/val_batch1_pred.jpg)
+
 ### 最佳模型权重
 
 训练产生的最佳模型权重文件位于：
