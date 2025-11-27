@@ -92,7 +92,7 @@ class SafetyMonitorWindow(QMainWindow):
                     'retention_days': 30
                 },
                 'ui': {
-                    'queue_maxsize': 10,
+                    'queue_maxsize': 1,  # 减少队列大小以降低延迟
                     'fps': 30
                 }
             }
@@ -286,18 +286,22 @@ class SafetyMonitorWindow(QMainWindow):
         # 增加帧计数
         self.frame_count += 1
         
-        # 显示原始帧
+        # 显示原始帧（总是显示）
         self.result_display.display_frame(self.display_original, original_frame)
         
-        # 执行模型推理
+        # 执行模型推理（控制处理频率）
         self.model_infer.infer_single_frame(processed_frame)
     
     @pyqtSlot(dict)
     def on_inference_finished(self, result_data):
         """推理完成"""
+        # 忽略空结果
+        if result_data is None:
+            return
+            
         # 记录推理时间用于统计
         self.inference_times.append(result_data['inference_time'])
-        if len(self.inference_times) > 100:  # 限制列表长度
+        if len(self.inference_times) > 30:  # 限制列表长度以反映近期性能
             self.inference_times.pop(0)
         
         # 显示标注后的帧
@@ -310,19 +314,20 @@ class SafetyMonitorWindow(QMainWindow):
         sound_enabled = self.checkbox_alarm_sound.isChecked()
         self.result_display.trigger_alert(result_data['detections'], sound_enabled)
         
-        # 存储数据
-        input_type = self.get_current_input_type()
-        self.storage.insert_recognition_record(input_type, result_data['detections'])
-        
-        # 检查是否有高风险目标需要记录到告警日志
-        high_risk_detections = [
-            d for d in result_data['detections'] 
-            if d['risk_level'] in ["紧急", "高风险", "中风险"]
-        ]
-        
-        for detection in high_risk_detections:
-            target_info = f"{detection['chinese_name']} (置信度: {detection['confidence']:.2f})"
-            self.storage.insert_alarm_log(detection['risk_level'], target_info)
+        # 存储数据（限制频率以提高性能）
+        if len(self.inference_times) % 5 == 0:  # 每5帧存储一次数据
+            input_type = self.get_current_input_type()
+            self.storage.insert_recognition_record(input_type, result_data['detections'])
+            
+            # 检查是否有高风险目标需要记录到告警日志
+            high_risk_detections = [
+                d for d in result_data['detections'] 
+                if d['risk_level'] in ["紧急", "高风险", "中风险"]
+            ]
+            
+            for detection in high_risk_detections:
+                target_info = f"{detection['chinese_name']} (置信度: {detection['confidence']:.2f})"
+                self.storage.insert_alarm_log(detection['risk_level'], target_info)
     
     @pyqtSlot(str)
     def on_input_error(self, error_msg):
@@ -376,7 +381,7 @@ class SafetyMonitorWindow(QMainWindow):
                 self.avg_inference_time = sum(self.inference_times) / len(self.inference_times)
             
             # 更新状态栏显示FPS和推理时间
-            status_text = f"FPS: {self.fps:.1f}"
+            status_text = f"显示FPS: {self.fps:.1f}"
             if self.avg_inference_time > 0:
                 status_text += f" | 平均推理时间: {self.avg_inference_time*1000:.1f}ms"
             

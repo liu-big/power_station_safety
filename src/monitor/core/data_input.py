@@ -22,6 +22,8 @@ class DataInput(QObject):
         # 添加最大帧率控制
         self.max_fps = config['ui'].get('fps', 30)
         self.frame_time = 1.0 / self.max_fps if self.max_fps > 0 else 0
+        # 添加最新帧缓存，避免处理积压的帧
+        self.latest_frame = None
 
     def start(self):
         """开始数据输入"""
@@ -50,12 +52,13 @@ class DataInput(QObject):
         """将帧放入队列"""
         try:
             if not self.paused and self.running:
-                # 如果队列满了，移除最旧的帧
-                while not self.frame_queue.empty() and self.frame_queue.full():
+                # 直接替换队列中的帧，确保处理的是最新帧
+                while not self.frame_queue.empty():
                     try:
                         self.frame_queue.get_nowait()
                     except queue.Empty:
                         break
+                        
                 self.frame_queue.put((original_frame, processed_frame))
                 self.frame_ready.emit(original_frame, processed_frame)
         except Exception as e:
@@ -114,6 +117,9 @@ class CameraInput(DataInput):
         super().__init__(config)
         self.camera_id = 0
         self.cap = None
+        # 设置目标处理帧率（每秒处理的帧数）
+        self.process_fps = 5  # 每秒处理5帧，可根据需要调整
+        self.process_frame_time = 1.0 / self.process_fps
 
     def set_camera_id(self, camera_id):
         """设置摄像头ID"""
@@ -128,17 +134,22 @@ class CameraInput(DataInput):
                 self.error_occurred.emit("无法打开摄像头")
                 return
 
-            # 设置摄像头参数以提高稳定性
+            # 设置摄像头参数以提高性能
             self.cap.set(cv2.CAP_PROP_BUFFERSIZE, 1)  # 减少缓冲区大小
             self.cap.set(cv2.CAP_PROP_FPS, 30)  # 设置帧率为30fps
             
+            # 尝试设置更低的分辨率以提高处理速度
+            self.cap.set(cv2.CAP_PROP_FRAME_WIDTH, 640)
+            self.cap.set(cv2.CAP_PROP_FRAME_HEIGHT, 480)
+            
+            last_process_time = time.time()
             last_frame_time = time.time()
             
             while self.running:
                 if not self.paused:
                     current_time = time.time()
-                    # 控制帧率
-                    if (current_time - last_frame_time) >= self.frame_time:
+                    # 控制显示帧率（最多30fps）
+                    if (current_time - last_frame_time) >= (1.0 / 30):
                         ret, frame = self.cap.read()
                         if not ret:
                             self.error_occurred.emit("无法读取摄像头帧")
@@ -147,12 +158,16 @@ class CameraInput(DataInput):
                         # 预处理
                         processed_frame = self._preprocess_frame(frame)
                         
-                        # 发送帧
-                        self._put_frame(frame.copy(), processed_frame)
+                        # 控制处理帧率（每秒处理指定数量的帧）
+                        if (current_time - last_process_time) >= self.process_frame_time:
+                            # 发送帧进行处理
+                            self._put_frame(frame.copy(), processed_frame)
+                            last_process_time = current_time
+                        
                         last_frame_time = current_time
 
                     # 短暂休眠以减少CPU使用
-                    time.sleep(0.001)
+                    time.sleep(0.005)  # 5ms休眠
                 else:
                     # 暂停时短暂休眠以减少CPU使用
                     time.sleep(0.01)
@@ -179,6 +194,9 @@ class VideoInput(DataInput):
         super().__init__(config)
         self.video_path = None
         self.cap = None
+        # 设置目标处理帧率（每秒处理的帧数）
+        self.process_fps = 5  # 每秒处理5帧，可根据需要调整
+        self.process_frame_time = 1.0 / self.process_fps
 
     def set_video_path(self, path):
         """设置视频路径"""
@@ -201,15 +219,16 @@ class VideoInput(DataInput):
             fps = self.cap.get(cv2.CAP_PROP_FPS)
             if fps <= 0:
                 fps = self.config['ui']['fps']
-            delay = 1.0 / fps
+            display_delay = 1.0 / min(fps, 30)  # 最大显示帧率30fps
 
+            last_process_time = time.time()
             last_frame_time = time.time()
             
             while self.running:
                 if not self.paused:
                     current_time = time.time()
-                    # 控制帧率
-                    if (current_time - last_frame_time) >= delay:
+                    # 控制显示帧率
+                    if (current_time - last_frame_time) >= display_delay:
                         ret, frame = self.cap.read()
                         if not ret:
                             # 视频结束
@@ -218,12 +237,16 @@ class VideoInput(DataInput):
                         # 预处理
                         processed_frame = self._preprocess_frame(frame)
                         
-                        # 发送帧
-                        self._put_frame(frame.copy(), processed_frame)
+                        # 控制处理帧率（每秒处理指定数量的帧）
+                        if (current_time - last_process_time) >= self.process_frame_time:
+                            # 发送帧进行处理
+                            self._put_frame(frame.copy(), processed_frame)
+                            last_process_time = current_time
+                        
                         last_frame_time = current_time
 
                     # 短暂休眠以减少CPU使用
-                    time.sleep(0.001)
+                    time.sleep(0.005)  # 5ms休眠
                 else:
                     # 暂停时短暂休眠以减少CPU使用
                     time.sleep(0.01)

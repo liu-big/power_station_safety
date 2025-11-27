@@ -32,6 +32,11 @@ class YoloInfer(QObject):
         try:
             model_path = self.config['model']['path']
             self.model = YOLO(model_path)
+            
+            # 设置模型为评估模式
+            if hasattr(self.model, 'model') and hasattr(self.model.model, 'eval'):
+                self.model.model.eval()
+                
             print(f"模型加载成功，使用设备: {self.device}")
             return True
         except Exception as e:
@@ -65,7 +70,9 @@ class YoloInfer(QObject):
                 frame, 
                 conf=self.confidence_threshold, 
                 device=self.device,
-                verbose=False  # 减少日志输出
+                verbose=False,  # 减少日志输出
+                half=(self.device == 'cuda'),  # 如果使用CUDA则启用半精度
+                stream=False  # 禁用流式处理
             )
             
             # 检查是否超时
@@ -91,35 +98,23 @@ class YoloInfer(QObject):
 
     def _put_chinese_text(self, img, text, pos, font_size=20, color=(255, 255, 255)):
         """在图像上绘制中文文本"""
-        img_pil = Image.fromarray(cv2.cvtColor(img, cv2.COLOR_BGR2RGB))
-        draw = ImageDraw.Draw(img_pil)
-        
-        # 尝试使用几种常见的中文字体
-        font_paths = [
-            "simhei.ttf",  # 黑体
-            "simsun.ttc",  # 宋体
-            "msyh.ttc",    # 微软雅黑
-            "arialuni.ttf" # Arial Unicode
-        ]
-        
-        font = None
-        for font_path in font_paths:
-            try:
-                font = ImageFont.truetype(font_path, font_size)
-                break
-            except:
-                continue
-        
-        # 如果找不到字体文件，使用默认字体
-        if font is None:
+        # 为了提高性能，简化中文文本绘制
+        try:
+            img_pil = Image.fromarray(cv2.cvtColor(img, cv2.COLOR_BGR2RGB))
+            draw = ImageDraw.Draw(img_pil)
+            
+            # 使用默认字体而不是尝试加载系统字体
             font = ImageFont.load_default()
-        
-        # 绘制文本
-        draw.text(pos, text, font=font, fill=color)
-        
-        # 转换回OpenCV格式
-        img_cv = cv2.cvtColor(np.array(img_pil), cv2.COLOR_RGB2BGR)
-        return img_cv
+            
+            # 绘制文本
+            draw.text(pos, text, font=font, fill=color)
+            
+            # 转换回OpenCV格式
+            img_cv = cv2.cvtColor(np.array(img_pil), cv2.COLOR_RGB2BGR)
+            return img_cv
+        except:
+            # 如果PIL方法失败，回退到OpenCV
+            return img
 
     def _parse_results(self, frame, results, inference_time):
         """解析推理结果"""
@@ -189,22 +184,24 @@ class YoloInfer(QObject):
             # 绘制标签
             label = f"{chinese_name} {conf:.2f}"
             
-            # 使用支持中文的函数绘制标签
+            # 优化标签绘制，提高性能
             try:
-                # 绘制标签背景
+                # 简化的标签绘制，避免复杂的PIL操作
                 ((text_width, text_height), _) = cv2.getTextSize(label, cv2.FONT_HERSHEY_SIMPLEX, 0.6, 1)
-                cv2.rectangle(annotated_frame, (x1, y1 - 30), (x1 + text_width, y1), color, -1)
                 
-                # 绘制中文标签
-                annotated_frame = self._put_chinese_text(
-                    annotated_frame, 
-                    label, 
-                    (x1, y1 - 25), 
-                    font_size=18, 
-                    color=(255, 255, 255)  # 白色文字
-                )
+                # 绘制标签背景
+                cv2.rectangle(annotated_frame, (x1, y1 - 20), (x1 + text_width, y1), color, -1)
+                
+                # 绘制标签文字
+                cv2.putText(annotated_frame, label, 
+                           (x1, y1 - 5), 
+                           cv2.FONT_HERSHEY_SIMPLEX, 
+                           0.6, 
+                           (255, 255, 255), 
+                           1, 
+                           cv2.LINE_AA)
             except Exception as e:
-                # 如果中文绘制失败，使用备用方案
+                # 简单的文本绘制作为备选
                 cv2.putText(annotated_frame, label, 
                            (x1, y1 - 10), 
                            cv2.FONT_HERSHEY_SIMPLEX, 

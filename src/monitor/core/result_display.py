@@ -16,6 +16,9 @@ class ResultDisplay(QObject):
         self.enable_sound_alarm = True
         self.alert_timer = None
         self.blink_timers = []  # 用于跟踪所有闪烁定时器
+        # 添加声音告警冷却时间，避免过于频繁的告警声
+        self.last_sound_time = 0
+        self.sound_cooldown = 1.0  # 1秒冷却时间
         
     def display_frame(self, label, frame):
         """在 QLabel 上显示图像帧"""
@@ -59,7 +62,7 @@ class ResultDisplay(QObject):
                 list_widget.insertItem(0, item_text)
                 
                 # 限制列表项数量，防止过多占用内存
-                if list_widget.count() > 100:
+                if list_widget.count() > 50:  # 减少列表项数量以提高性能
                     list_widget.takeItem(list_widget.count() - 1)
                 
                 # 设置风险级别样式
@@ -99,9 +102,11 @@ class ResultDisplay(QObject):
             alert_msg = f"检测到 {class_name}，风险等级: {risk_level}"
             self.alert_triggered.emit(risk_level, alert_msg)
             
-            # 声音告警
-            if sound_enabled:
+            # 声音告警（带冷却时间限制）
+            current_time = time.time()
+            if sound_enabled and (current_time - self.last_sound_time) >= self.sound_cooldown:
                 self._play_sound_alert(risk_level)
+                self.last_sound_time = current_time
                 
         except Exception as e:
             print(f"触发告警错误: {str(e)}")
@@ -111,15 +116,15 @@ class ResultDisplay(QObject):
         try:
             if risk_level == "紧急":
                 # 紧急告警 - 高频蜂鸣
-                winsound.Beep(1000, 500)
+                winsound.Beep(1000, 300)  # 缩短持续时间以提高响应性
             elif risk_level == "高风险":
                 # 高风险告警 - 中频蜂鸣
-                winsound.Beep(800, 300)
+                winsound.Beep(800, 200)
             elif risk_level == "中风险":
                 # 中风险告警 - 低频蜂鸣
-                winsound.Beep(600, 200)
+                winsound.Beep(600, 100)
         except Exception as e:
-            print(f"播放声音告警错误: {str(e)}")
+            print(f"播放声音告警错误: {str(e)}. 这可能是由于系统不支持或没有音频设备导致的，但不影响主要功能。")
     
     def update_alert_display(self, label, risk_level, message):
         """更新告警显示"""
@@ -158,11 +163,11 @@ class ResultDisplay(QObject):
         # 保存定时器引用
         self.blink_timers.append(blink_timer)
         
-        # 5秒后停止闪烁
+        # 3秒后停止闪烁
         stop_timer = QTimer()
         stop_timer.timeout.connect(lambda: self._stop_blinking(label, color))
         stop_timer.setSingleShot(True)
-        stop_timer.start(5000)
+        stop_timer.start(3000)
         self.blink_timers.append(stop_timer)
     
     def _toggle_blink(self, label, color):
