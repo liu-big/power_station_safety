@@ -5,6 +5,7 @@ from PyQt5.QtWidgets import QApplication, QMainWindow, QFileDialog, QMessageBox
 from PyQt5.QtCore import Qt, pyqtSlot, QTimer
 from PyQt5.uic import loadUi
 import numpy as np
+import time
 
 # 添加src目录到Python路径
 sys.path.append(os.path.join(os.path.dirname(__file__), '..'))
@@ -47,6 +48,8 @@ class SafetyMonitorWindow(QMainWindow):
         self.frame_count = 0
         self.last_time = time.time()
         self.fps = 0
+        self.avg_inference_time = 0
+        self.inference_times = []
         
     def load_config(self):
         """加载配置文件"""
@@ -232,6 +235,7 @@ class SafetyMonitorWindow(QMainWindow):
         # 重置性能统计
         self.frame_count = 0
         self.last_time = time.time()
+        self.inference_times.clear()
         
         # 开始数据输入
         self.current_input.start()
@@ -291,6 +295,11 @@ class SafetyMonitorWindow(QMainWindow):
     @pyqtSlot(dict)
     def on_inference_finished(self, result_data):
         """推理完成"""
+        # 记录推理时间用于统计
+        self.inference_times.append(result_data['inference_time'])
+        if len(self.inference_times) > 100:  # 限制列表长度
+            self.inference_times.pop(0)
+        
         # 显示标注后的帧
         self.result_display.display_frame(self.display_annotated, result_data['annotated_frame'])
         
@@ -352,7 +361,6 @@ class SafetyMonitorWindow(QMainWindow):
         """查询历史记录"""
         QMessageBox.information(self, "功能提示", "历史记录查询功能将在后续版本中实现")
     
-    @pyqtSlot()
     def update_performance_info(self):
         """更新性能信息"""
         current_time = time.time()
@@ -363,8 +371,16 @@ class SafetyMonitorWindow(QMainWindow):
             self.frame_count = 0
             self.last_time = current_time
             
-            # 更新状态栏显示FPS（如果有的话）
-            # 可以添加到界面中显示实时性能信息
+            # 计算平均推理时间
+            if self.inference_times:
+                self.avg_inference_time = sum(self.inference_times) / len(self.inference_times)
+            
+            # 更新状态栏显示FPS和推理时间
+            status_text = f"FPS: {self.fps:.1f}"
+            if self.avg_inference_time > 0:
+                status_text += f" | 平均推理时间: {self.avg_inference_time*1000:.1f}ms"
+            
+            self.statusBar().showMessage(status_text)
     
     def closeEvent(self, event):
         """关闭事件"""
@@ -387,5 +403,4 @@ def main():
 
 
 if __name__ == "__main__":
-    import time
     main()
