@@ -40,7 +40,7 @@ class DataInput(QObject):
         """停止数据输入"""
         self.running = False
         if self.thread and self.thread.is_alive():
-            self.thread.join()
+            self.thread.join(timeout=2.0)  # 设置超时避免无限等待
 
     def _run(self):
         """运行数据输入线程"""
@@ -128,6 +128,10 @@ class CameraInput(DataInput):
                 self.error_occurred.emit("无法打开摄像头")
                 return
 
+            # 设置摄像头参数以提高稳定性
+            self.cap.set(cv2.CAP_PROP_BUFFERSIZE, 1)  # 减少缓冲区大小
+            self.cap.set(cv2.CAP_PROP_FPS, 30)  # 设置帧率为30fps
+            
             last_frame_time = time.time()
             
             while self.running:
@@ -149,6 +153,9 @@ class CameraInput(DataInput):
 
                     # 短暂休眠以减少CPU使用
                     time.sleep(0.001)
+                else:
+                    # 暂停时短暂休眠以减少CPU使用
+                    time.sleep(0.01)
 
         except Exception as e:
             self.error_occurred.emit(f"摄像头输入错误: {str(e)}")
@@ -202,7 +209,7 @@ class VideoInput(DataInput):
                 if not self.paused:
                     current_time = time.time()
                     # 控制帧率
-                    if (current_time - last_frame_time) >= self.frame_time:
+                    if (current_time - last_frame_time) >= delay:
                         ret, frame = self.cap.read()
                         if not ret:
                             # 视频结束
@@ -217,13 +224,15 @@ class VideoInput(DataInput):
 
                     # 短暂休眠以减少CPU使用
                     time.sleep(0.001)
+                else:
+                    # 暂停时短暂休眠以减少CPU使用
+                    time.sleep(0.01)
 
         except Exception as e:
             self.error_occurred.emit(f"视频输入错误: {str(e)}")
         finally:
             if self.cap:
                 self.cap.release()
-            self.running = False
             self.finished.emit()
 
     def _preprocess_frame(self, frame):

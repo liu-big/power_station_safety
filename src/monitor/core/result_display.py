@@ -15,6 +15,7 @@ class ResultDisplay(QObject):
         self.config = config
         self.enable_sound_alarm = True
         self.alert_timer = None
+        self.blink_timers = []  # 用于跟踪所有闪烁定时器
         
     def display_frame(self, label, frame):
         """在 QLabel 上显示图像帧"""
@@ -35,8 +36,8 @@ class ResultDisplay(QObject):
             label.setPixmap(pixmap.scaled(
                 label.width(), 
                 label.height(), 
-                aspectRatioMode=1,  # Qt.KeepAspectRatio
-                transformMode=1     # Qt.SmoothTransformation
+                Qt.KeepAspectRatio,
+                Qt.SmoothTransformation
             ))
         except Exception as e:
             print(f"显示帧错误: {str(e)}")
@@ -56,6 +57,10 @@ class ResultDisplay(QObject):
                 
                 # 添加到列表顶部
                 list_widget.insertItem(0, item_text)
+                
+                # 限制列表项数量，防止过多占用内存
+                if list_widget.count() > 100:
+                    list_widget.takeItem(list_widget.count() - 1)
                 
                 # 设置风险级别样式
                 item = list_widget.item(0)
@@ -125,52 +130,61 @@ class ResultDisplay(QObject):
             # 根据风险等级设置背景色
             if risk_level == "紧急":
                 # 红色闪烁效果通过定时器实现
-                label.setStyleSheet("background-color: red; color: white;")
+                label.setStyleSheet("background-color: red; color: white; padding: 5px;")
                 self._start_blinking_effect(label, "red")
             elif risk_level == "高风险":
                 # 黄色背景
-                label.setStyleSheet("background-color: yellow; color: black;")
+                label.setStyleSheet("background-color: yellow; color: black; padding: 5px;")
             elif risk_level == "中风险":
                 # 橙色背景
-                label.setStyleSheet("background-color: orange; color: black;")
+                label.setStyleSheet("background-color: orange; color: black; padding: 5px;")
             else:
                 # 正常状态
-                label.setStyleSheet("background-color: lightgray; color: black;")
+                label.setStyleSheet("background-color: lightgray; color: black; padding: 5px;")
                 
         except Exception as e:
             print(f"更新告警显示错误: {str(e)}")
     
     def _start_blinking_effect(self, label, color):
         """开始闪烁效果"""
-        # 如果已经有定时器在运行，先停止它
-        if self.alert_timer and self.alert_timer.isActive():
-            self.alert_timer.stop()
-            
+        # 停止之前的闪烁定时器
+        self._stop_all_blinking()
+        
         # 创建新的定时器
-        self.alert_timer = QTimer()
-        self.alert_timer.timeout.connect(lambda: self._toggle_blink(label, color))
-        self.alert_timer.start(500)  # 500ms切换一次
+        blink_timer = QTimer()
+        blink_timer.timeout.connect(lambda: self._toggle_blink(label, color))
+        blink_timer.start(500)  # 500ms切换一次
+        
+        # 保存定时器引用
+        self.blink_timers.append(blink_timer)
         
         # 5秒后停止闪烁
         stop_timer = QTimer()
-        stop_timer.timeout.connect(lambda: self._stop_blinking(label))
+        stop_timer.timeout.connect(lambda: self._stop_blinking(label, color))
         stop_timer.setSingleShot(True)
         stop_timer.start(5000)
+        self.blink_timers.append(stop_timer)
     
     def _toggle_blink(self, label, color):
         """切换闪烁状态"""
         current_style = label.styleSheet()
         if "white" in current_style or color not in current_style:
             # 显示彩色背景
-            label.setStyleSheet(f"background-color: {color}; color: white;")
+            label.setStyleSheet(f"background-color: {color}; color: white; padding: 5px;")
         else:
             # 显示白色背景
-            label.setStyleSheet("background-color: white; color: black;")
+            label.setStyleSheet("background-color: white; color: black; padding: 5px;")
     
-    def _stop_blinking(self, label):
-        """停止闪烁"""
-        if self.alert_timer and self.alert_timer.isActive():
-            self.alert_timer.stop()
-        label.setStyleSheet("background-color: red; color: white;")
-
-
+    def _stop_blinking(self, label, color):
+        """停止闪烁并恢复原始颜色"""
+        # 停止所有闪烁定时器
+        self._stop_all_blinking()
+        # 恢复红色背景
+        label.setStyleSheet("background-color: red; color: white; padding: 5px;")
+    
+    def _stop_all_blinking(self):
+        """停止所有闪烁效果"""
+        for timer in self.blink_timers:
+            if timer and timer.isActive():
+                timer.stop()
+        self.blink_timers.clear()

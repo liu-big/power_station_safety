@@ -4,6 +4,7 @@ import numpy as np
 from ultralytics import YOLO
 from PyQt5.QtCore import QObject, pyqtSignal
 import time
+from PIL import Image, ImageDraw, ImageFont
 
 
 class YoloInfer(QObject):
@@ -22,6 +23,9 @@ class YoloInfer(QObject):
         self.risk_levels = config['risk_levels']
         # 添加推理超时设置（秒）
         self.inference_timeout = 5.0
+        # 添加推理缓存以提高重复帧的处理速度
+        self.last_frame_hash = None
+        self.last_result = None
 
     def load_model(self):
         """加载模型"""
@@ -45,6 +49,14 @@ class YoloInfer(QObject):
                 self.error_occurred.emit("模型未加载")
                 return None
 
+            # 计算帧的哈希值，用于缓存优化
+            frame_hash = hash(frame.tobytes())
+            
+            # 如果是同一帧，直接返回缓存结果
+            if frame_hash == self.last_frame_hash and self.last_result is not None:
+                self.inference_finished.emit(self.last_result)
+                return self.last_result
+
             # 记录开始时间
             start_time = time.time()
             
@@ -64,6 +76,10 @@ class YoloInfer(QObject):
             # 解析结果
             result_data = self._parse_results(frame, results, inference_time)
             
+            # 缓存结果
+            self.last_frame_hash = frame_hash
+            self.last_result = result_data
+            
             # 发送结果信号
             self.inference_finished.emit(result_data)
             
@@ -72,6 +88,38 @@ class YoloInfer(QObject):
         except Exception as e:
             self.error_occurred.emit(f"推理错误: {str(e)}")
             return None
+
+    def _put_chinese_text(self, img, text, pos, font_size=20, color=(255, 255, 255)):
+        """在图像上绘制中文文本"""
+        img_pil = Image.fromarray(cv2.cvtColor(img, cv2.COLOR_BGR2RGB))
+        draw = ImageDraw.Draw(img_pil)
+        
+        # 尝试使用几种常见的中文字体
+        font_paths = [
+            "simhei.ttf",  # 黑体
+            "simsun.ttc",  # 宋体
+            "msyh.ttc",    # 微软雅黑
+            "arialuni.ttf" # Arial Unicode
+        ]
+        
+        font = None
+        for font_path in font_paths:
+            try:
+                font = ImageFont.truetype(font_path, font_size)
+                break
+            except:
+                continue
+        
+        # 如果找不到字体文件，使用默认字体
+        if font is None:
+            font = ImageFont.load_default()
+        
+        # 绘制文本
+        draw.text(pos, text, font=font, fill=color)
+        
+        # 转换回OpenCV格式
+        img_cv = cv2.cvtColor(np.array(img_pil), cv2.COLOR_RGB2BGR)
+        return img_cv
 
     def _parse_results(self, frame, results, inference_time):
         """解析推理结果"""
@@ -141,32 +189,29 @@ class YoloInfer(QObject):
             # 绘制标签
             label = f"{chinese_name} {conf:.2f}"
             
-            # 使用 Hershey fonts 字体系列中的 FONT_HERSHEY_SIMPLEX 字体
-            font = cv2.FONT_HERSHEY_SIMPLEX
-            font_scale = 0.6
-            thickness = 1
-            
-            # 获取文本大小
-            (text_width, text_height), baseline = cv2.getTextSize(label, font, font_scale, thickness)
-            
-            # 确保标签不会超出图像边界
-            label_x = x1
-            label_y = max(y1 - 10, text_height + 10)
-            
-            # 绘制标签背景，增加一点填充使文本更清晰
-            cv2.rectangle(annotated_frame, 
-                         (label_x, label_y - text_height - 5), 
-                         (label_x + text_width, label_y + 5), 
-                         color, -1)
-            
-            # 绘制标签文字，使用 LINE_AA 抗锯齿
-            cv2.putText(annotated_frame, label, 
-                       (label_x, label_y), 
-                       font, 
-                       font_scale, 
-                       (255, 255, 255), 
-                       thickness, 
-                       cv2.LINE_AA)
+            # 使用支持中文的函数绘制标签
+            try:
+                # 绘制标签背景
+                ((text_width, text_height), _) = cv2.getTextSize(label, cv2.FONT_HERSHEY_SIMPLEX, 0.6, 1)
+                cv2.rectangle(annotated_frame, (x1, y1 - 30), (x1 + text_width, y1), color, -1)
+                
+                # 绘制中文标签
+                annotated_frame = self._put_chinese_text(
+                    annotated_frame, 
+                    label, 
+                    (x1, y1 - 25), 
+                    font_size=18, 
+                    color=(255, 255, 255)  # 白色文字
+                )
+            except Exception as e:
+                # 如果中文绘制失败，使用备用方案
+                cv2.putText(annotated_frame, label, 
+                           (x1, y1 - 10), 
+                           cv2.FONT_HERSHEY_SIMPLEX, 
+                           0.6, 
+                           (255, 255, 255), 
+                           1, 
+                           cv2.LINE_AA)
         
         return {
             'frame': frame,

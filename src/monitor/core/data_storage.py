@@ -20,6 +20,11 @@ class SqliteStorage(QObject):
     def init_db(self):
         """初始化数据库"""
         try:
+            # 确保数据库目录存在
+            db_dir = os.path.dirname(self.db_path)
+            if db_dir and not os.path.exists(db_dir):
+                os.makedirs(db_dir)
+                
             with self.lock:
                 conn = sqlite3.connect(self.db_path)
                 cursor = conn.cursor()
@@ -58,6 +63,9 @@ class SqliteStorage(QObject):
     def insert_recognition_record(self, input_type, detections, image_path=None):
         """插入识别记录"""
         try:
+            # 确保表存在
+            self._ensure_tables_exist()
+            
             timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
             
             with self.lock:
@@ -87,6 +95,9 @@ class SqliteStorage(QObject):
     def insert_alarm_log(self, risk_level, target_info):
         """插入告警日志"""
         try:
+            # 确保表存在
+            self._ensure_tables_exist()
+            
             timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
             
             with self.lock:
@@ -110,112 +121,113 @@ class SqliteStorage(QObject):
         except Exception as e:
             self.error_occurred.emit(f"插入告警日志失败: {str(e)}")
     
-    def query_records(self, start_time=None, end_time=None, risk_level=None, limit=100):
+    def _ensure_tables_exist(self):
+        """确保数据库表存在"""
+        try:
+            with self.lock:
+                conn = sqlite3.connect(self.db_path)
+                cursor = conn.cursor()
+                
+                # 检查并创建识别记录表
+                cursor.execute('''
+                    CREATE TABLE IF NOT EXISTS recognition_records (
+                        id INTEGER PRIMARY KEY AUTOINCREMENT,
+                        timestamp TEXT NOT NULL,
+                        input_type TEXT NOT NULL,
+                        target_type TEXT NOT NULL,
+                        confidence REAL NOT NULL,
+                        risk_level TEXT NOT NULL,
+                        image_path TEXT
+                    )
+                ''')
+                
+                # 检查并创建告警日志表
+                cursor.execute('''
+                    CREATE TABLE IF NOT EXISTS alarm_logs (
+                        id INTEGER PRIMARY KEY AUTOINCREMENT,
+                        timestamp TEXT NOT NULL,
+                        risk_level TEXT NOT NULL,
+                        target_info TEXT NOT NULL,
+                        handle_status TEXT DEFAULT '未处理'
+                    )
+                ''')
+                
+                conn.commit()
+                conn.close()
+        except Exception as e:
+            print(f"确保表存在时出错: {str(e)}")
+    
+    def clean_old_records(self):
+        """清理过期记录"""
+        try:
+            retention_days = self.config['database'].get('retention_days', 30)
+            cutoff_date = datetime.now() - timedelta(days=retention_days)
+            cutoff_str = cutoff_date.strftime("%Y-%m-%d %H:%M:%S")
+            
+            with self.lock:
+                conn = sqlite3.connect(self.db_path)
+                cursor = conn.cursor()
+                
+                # 删除过期的识别记录
+                cursor.execute('''
+                    DELETE FROM recognition_records WHERE timestamp < ?
+                ''', (cutoff_str,))
+                records_deleted = cursor.rowcount
+                
+                # 删除过期的告警日志
+                cursor.execute('''
+                    DELETE FROM alarm_logs WHERE timestamp < ?
+                ''', (cutoff_str,))
+                logs_deleted = cursor.rowcount
+                
+                conn.commit()
+                conn.close()
+                
+                print(f"清理了 {records_deleted} 条识别记录和 {logs_deleted} 条告警日志")
+                
+        except Exception as e:
+            self.error_occurred.emit(f"清理过期记录失败: {str(e)}")
+    
+    def query_recognition_records(self, limit=100):
         """查询识别记录"""
         try:
             with self.lock:
                 conn = sqlite3.connect(self.db_path)
                 cursor = conn.cursor()
                 
-                # 构建查询语句
-                query = "SELECT * FROM recognition_records WHERE 1=1"
-                params = []
+                cursor.execute('''
+                    SELECT * FROM recognition_records 
+                    ORDER BY timestamp DESC 
+                    LIMIT ?
+                ''', (limit,))
                 
-                if start_time:
-                    query += " AND timestamp >= ?"
-                    params.append(start_time)
-                    
-                if end_time:
-                    query += " AND timestamp <= ?"
-                    params.append(end_time)
-                    
-                if risk_level:
-                    query += " AND risk_level = ?"
-                    params.append(risk_level)
-                    
-                query += " ORDER BY timestamp DESC LIMIT ?"
-                params.append(limit)
-                
-                cursor.execute(query, params)
                 records = cursor.fetchall()
-                
                 conn.close()
+                
                 return records
                 
         except Exception as e:
             self.error_occurred.emit(f"查询识别记录失败: {str(e)}")
             return []
     
-    def query_alarms(self, start_time=None, end_time=None, risk_level=None, handle_status=None, limit=100):
+    def query_alarm_logs(self, limit=100):
         """查询告警日志"""
         try:
             with self.lock:
                 conn = sqlite3.connect(self.db_path)
                 cursor = conn.cursor()
                 
-                # 构建查询语句
-                query = "SELECT * FROM alarm_logs WHERE 1=1"
-                params = []
+                cursor.execute('''
+                    SELECT * FROM alarm_logs 
+                    ORDER BY timestamp DESC 
+                    LIMIT ?
+                ''', (limit,))
                 
-                if start_time:
-                    query += " AND timestamp >= ?"
-                    params.append(start_time)
-                    
-                if end_time:
-                    query += " AND timestamp <= ?"
-                    params.append(end_time)
-                    
-                if risk_level:
-                    query += " AND risk_level = ?"
-                    params.append(risk_level)
-                    
-                if handle_status:
-                    query += " AND handle_status = ?"
-                    params.append(handle_status)
-                    
-                query += " ORDER BY timestamp DESC LIMIT ?"
-                params.append(limit)
-                
-                cursor.execute(query, params)
-                alarms = cursor.fetchall()
-                
+                logs = cursor.fetchall()
                 conn.close()
-                return alarms
+                
+                return logs
                 
         except Exception as e:
             self.error_occurred.emit(f"查询告警日志失败: {str(e)}")
             return []
-    
-    def clean_old_records(self):
-        """清理旧记录"""
-        try:
-            # 计算保留日期
-            retention_days = self.config['database']['retention_days']
-            cutoff_date = datetime.now() - timedelta(days=retention_days)
-            cutoff_date_str = cutoff_date.strftime("%Y-%m-%d %H:%M:%S")
-            
-            with self.lock:
-                conn = sqlite3.connect(self.db_path)
-                cursor = conn.cursor()
-                
-                # 删除旧的识别记录
-                cursor.execute(
-                    "DELETE FROM recognition_records WHERE timestamp < ?", 
-                    (cutoff_date_str,)
-                )
-                deleted_records = cursor.rowcount
-                
-                # 删除旧的告警日志
-                cursor.execute(
-                    "DELETE FROM alarm_logs WHERE timestamp < ?", 
-                    (cutoff_date_str,)
-                )
-                deleted_alarms = cursor.rowcount
-                
-                conn.commit()
-                conn.close()
-                
-                print(f"清理了 {deleted_records} 条识别记录和 {deleted_alarms} 条告警日志")
-                
-        except Exception as e:
-            self.error_occurred.emit(f"清理旧记录失败: {str(e)}")
