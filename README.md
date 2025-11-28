@@ -115,6 +115,7 @@ python main.py
 ```bash
 python src/monitor/main_ui.py
 ```
+<img width="1211" height="842" alt="image" src="https://github.com/user-attachments/assets/fdf6ead9-2321-4380-bebf-70f6b1fcfa29" />
 
 ## 配置文件说明
 
